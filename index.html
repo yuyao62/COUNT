@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <title>藥粒計數 WebApp</title>
+  <style>
+    body { font-family: Arial, sans-serif; text-align: center; }
+    video, canvas { width: 90%; max-width: 400px; margin: 10px; }
+    #count { font-size: 1.5em; color: darkblue; margin-top: 15px; }
+  </style>
+</head>
+<body>
+  <h1>📱 藥粒計數 WebApp</h1>
+  <video id="video" autoplay playsinline></video>
+  <canvas id="canvas"></canvas>
+  <div id="count">偵測到藥粒數量：0</div>
+
+  <!-- 引入 OpenCV.js -->
+  <script async src="https://docs.opencv.org/4.x/opencv.js"></script>
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const countDiv = document.getElementById('count');
+
+    // 啟用相機
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+      .then(stream => { video.srcObject = stream; });
+
+    // 每隔一段時間做影像分析
+    video.addEventListener('play', () => {
+      const process = () => {
+        if (video.paused || video.ended) return;
+
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        // 使用 OpenCV 偵測輪廓
+        let src = cv.imread(canvas);
+        let gray = new cv.Mat();
+        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+        cv.threshold(gray, gray, 120, 255, cv.THRESH_BINARY);
+
+        let contours = new cv.MatVector();
+        let hierarchy = new cv.Mat();
+        cv.findContours(gray, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+        // 顯示計數
+        countDiv.textContent = "偵測到藥粒數量：" + contours.size();
+
+        // 清理記憶體
+        src.delete(); gray.delete(); contours.delete(); hierarchy.delete();
+
+        requestAnimationFrame(process);
+      };
+      process();
+    });
+  </script>
+</body>
+</html>
