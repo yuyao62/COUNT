@@ -4,26 +4,39 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>藥粒計數 WebApp (AI版)</title>
+
   <style>
     body{font-family:Arial, sans-serif;margin:0;padding:14px;background:#fafafa}
     .wrap{max-width:760px;margin:0 auto}
     h1{text-align:center;margin:8px 0 14px;font-size:24px}
+
     .panel{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:12px;margin:12px 0}
     .stage{display:grid;grid-template-columns:1fr 1fr;gap:12px}
     @media (max-width:720px){.stage{grid-template-columns:1fr}}
+
     video,canvas{width:100%;border-radius:12px;background:#0b1020}
-    .tag{display:inline-block;padding:4px 10px;border-radius:999px;background:#eef2ff;color:#3730a3;font-weight:700;font-size:12px}
+
     .row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:10px}
-    button{font-size:16px;padding:10px 14px;border-radius:12px;border:1px solid #d1d5db;background:#fff;cursor:pointer}
+    button{
+      font-size:16px;padding:10px 14px;border-radius:12px;
+      border:1px solid #d1d5db;background:#fff;cursor:pointer
+    }
     button.primary{border-color:#1d4ed8;color:#1d4ed8;font-weight:800}
     button:disabled{opacity:.45;cursor:not-allowed}
+
     #count{text-align:center;font-size:22px;font-weight:900;color:#1d4ed8;margin-top:12px}
+
     .kv{display:grid;grid-template-columns:110px 1fr;gap:8px 10px;align-items:center}
     input[type="number"]{width:120px;padding:8px;border-radius:10px;border:1px solid #d1d5db}
     select{padding:8px;border-radius:10px;border:1px solid #d1d5db}
     code{background:#f3f4f6;padding:3px 8px;border-radius:8px}
     .small{font-size:12px;color:#6b7280;line-height:1.45}
     #log{white-space:pre-wrap;background:#0b1020;color:#dbeafe;padding:10px;border-radius:12px;max-height:260px;overflow:auto;font-size:12px}
+
+    /* 🔥 iOS 觸控保證修正（關鍵） */
+    video, canvas { pointer-events: none; }
+    .row { position: relative; z-index: 9999; }
+    button { pointer-events: auto !important; }
   </style>
 </head>
 
@@ -34,12 +47,12 @@
   <div class="panel">
     <div class="stage">
       <div>
-        <div class="small"><span class="tag">即時相機</span></div>
-        <!-- iOS 必備：muted + playsinline；另外 JS 會再 setAttribute 一次 -->
+        <div class="small">即時相機</div>
+        <!-- iOS 必備：muted + playsinline -->
         <video id="video" autoplay muted playsinline></video>
       </div>
       <div>
-        <div class="small"><span class="tag">掃描結果</span></div>
+        <div class="small">掃描結果</div>
         <canvas id="canvas"></canvas>
       </div>
     </div>
@@ -73,7 +86,6 @@
           <option value="512" selected>512</option>
           <option value="640">640</option>
         </select>
-        <span class="small">（先 resize 再送模型）</span>
       </div>
 
       <div>狀態</div>
@@ -83,15 +95,16 @@
 
   <div class="panel">
     <div class="small">
-      必要條件：<b>HTTPS</b>（GitHub Pages OK）。若按啟動相機沒跳「允許相機」，請先按「🧪 測試權限」看錯誤名稱。
+      必要條件：HTTPS（GitHub Pages OK）。若沒跳相機權限，先按「🧪 測試權限」。
     </div>
     <div id="log"></div>
   </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+
 <script>
-  // ===== DOM =====
+  /* === 基本工具 === */
   const video = document.getElementById('video');
   const canvas = document.getElementById('canvas');
   const ctx = canvas.getContext('2d');
@@ -108,314 +121,141 @@
   const logEl = document.getElementById('log');
   const modelPathEl = document.getElementById('modelPath');
 
-  // ===== 狀態 =====
   let stream = null;
   let model = null;
   let modelLoaded = false;
 
-  function log(...args){
-    const msg = args.map(x => (typeof x === 'string' ? x : JSON.stringify(x, null, 2))).join(' ');
-    console.log(...args);
-    logEl.textContent = msg + "\n" + logEl.textContent;
-  }
+  function log(msg){ logEl.textContent = msg + "\n" + logEl.textContent; console.log(msg); }
   function setStatus(s){ statusEl.textContent = s; }
-
   function isSecureOK(){
-    const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-    return location.protocol === 'https:' || isLocal;
+    const isLocal = location.hostname==='localhost'||location.hostname==='127.0.0.1';
+    return location.protocol==='https:'||isLocal;
   }
-
-  function thr(){
-    const v = Number(thrEl.value);
-    return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0.5;
-  }
-  function inferSize(){
-    const v = Number(inferSizeEl.value);
-    return Number.isFinite(v) ? v : 512;
-  }
-
+  function thr(){ const v=Number(thrEl.value); return Number.isFinite(v)?Math.min(1,Math.max(0,v)):0.5; }
+  function inferSize(){ const v=Number(inferSizeEl.value); return Number.isFinite(v)?v:512; }
   function clearCanvas(){ ctx.clearRect(0,0,canvas.width,canvas.height); }
-  function drawFrame(){ ctx.drawImage(video, 0,0,canvas.width,canvas.height); }
-
-  function drawBox(box, score){
-    const [ymin,xmin,ymax,xmax] = box;
-    const x = xmin*canvas.width, y = ymin*canvas.height;
-    const w = (xmax-xmin)*canvas.width, h=(ymax-ymin)*canvas.height;
-
-    ctx.strokeStyle = 'red';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x,y,w,h);
-
-    ctx.fillStyle = 'red';
-    ctx.font = '16px Arial';
-    ctx.fillText((score*100).toFixed(1)+'%', x+4, Math.max(18, y+18));
-  }
+  function drawFrame(){ ctx.drawImage(video,0,0,canvas.width,canvas.height); }
 
   function stopCamera(){
-    if(stream){
-      stream.getTracks().forEach(t => t.stop());
-      stream = null;
-    }
-    video.srcObject = null;
-    scanBtn.disabled = true;
-    stopBtn.disabled = true;
+    if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
+    video.srcObject=null;
+    scanBtn.disabled=true;
+    stopBtn.disabled=true;
   }
 
-  async function waitMetadata(){
-    await new Promise(resolve => {
-      if(video.readyState >= 2 && video.videoWidth > 0) return resolve();
-      video.onloadedmetadata = () => resolve();
+  async function waitMeta(){
+    await new Promise(r=>{
+      if(video.readyState>=2 && video.videoWidth>0) return r();
+      video.onloadedmetadata=()=>r();
     });
   }
 
-  // ===== iOS 最保守相機啟動流程 =====
+  /* === iOS 最保守啟動流程 === */
   async function startCameraIOSSafe(){
-    if(!navigator.mediaDevices?.getUserMedia) throw new Error('此瀏覽器不支援 getUserMedia()');
-    if(!isSecureOK()) throw new Error('需要 HTTPS 或 localhost：'+location.href);
+    if(!navigator.mediaDevices?.getUserMedia) throw new Error('不支援 getUserMedia');
+    if(!isSecureOK()) throw new Error('需要 HTTPS：'+location.href);
 
     setStatus('啟動相機中…');
     stopCamera();
 
-    // iOS 關鍵：再補一次屬性（有些版本需要）
     video.setAttribute('playsinline','');
-    video.setAttribute('muted','');
     video.muted = true;
 
-    // 先用 getUserMedia 拿 stream
     stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: 'environment' } },
-      audio: false
+      video:{ facingMode:{ ideal:'environment' } }, audio:false
     });
     video.srcObject = stream;
 
-    // 等 metadata
-    await waitMetadata();
+    await waitMeta();
+    try{ await video.play(); }catch(e){ log('play1 fail'); }
+    await new Promise(r=>setTimeout(r,250));
+    try{ await video.play(); }catch(e){ log('play2 fail'); }
 
-    // iOS 關鍵：第一次 play
-    try { await video.play(); } catch(e) { log('play() 1 failed:', {name:e.name, message:e.message}); }
-
-    // iOS 關鍵：延遲再 play 一次（不少機型需要）
-    await new Promise(r => setTimeout(r, 250));
-    try { await video.play(); } catch(e) { log('play() 2 failed:', {name:e.name, message:e.message}); }
-
-    // 確認尺寸
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
+    canvas.width = video.videoWidth||640;
+    canvas.height = video.videoHeight||480;
 
     clearCanvas();
-    // 若尚未真正出影像，先不 draw（避免黑）
-    if(video.videoWidth > 0) drawFrame();
+    if(video.videoWidth>0) drawFrame();
 
-    setStatus(`相機已啟動：${canvas.width} x ${canvas.height}`);
-    stopBtn.disabled = false;
-    scanBtn.disabled = !modelLoaded;
+    setStatus(`相機已啟動：${canvas.width}x${canvas.height}`);
+    stopBtn.disabled=false;
+    scanBtn.disabled=!modelLoaded;
   }
 
-  // ===== 模型載入 =====
+  /* === 模型 === */
   async function loadModel(){
     setStatus('載入模型中…');
-    const path = modelPathEl.textContent.trim();
-
-    model = await tf.loadGraphModel(path);
+    model = await tf.loadGraphModel(modelPathEl.textContent.trim());
     modelLoaded = true;
-
-    log('✅ 模型載入完成');
-    log('inputs:', model.inputs.map(i => ({name:i.name, shape:i.shape, dtype:i.dtype})));
-    log('outputs:', model.outputs.map(o => ({name:o.name, shape:o.shape, dtype:o.dtype})));
-
+    log('模型已載入');
     setStatus('模型載入完成');
-    scanBtn.disabled = !stream;
+    scanBtn.disabled=!stream;
   }
 
-  function disposeOut(out){
-    if(Array.isArray(out)) out.forEach(t => t?.dispose?.());
-    else Object.values(out).forEach(t => t?.dispose?.());
-  }
-
-  function pickOutputs(out){
-    let boxesT=null, scoresT=null, numT=null;
-
-    if(Array.isArray(out)){
-      boxesT = out[0] || null;
-      scoresT = out[1] || null;
-      numT = out[3] || null;
-      return {boxesT, scoresT, numT};
-    }
-
-    boxesT  = out['detection_boxes']  || out['TFLite_Detection_PostProcess']   || null;
-    scoresT = out['detection_scores'] || out['TFLite_Detection_PostProcess:1'] || null;
-    numT    = out['num_detections']   || out['TFLite_Detection_PostProcess:3'] || null;
-
-    if(!boxesT || !scoresT){
-      const keys = Object.keys(out);
-      log('ℹ️ output keys:', keys);
-      for(const k of keys){
-        const t = out[k];
-        const s = t?.shape || [];
-        if(!boxesT && s.length===3 && s[s.length-1]===4) boxesT = t; // [1,N,4]
-        if(!scoresT && s.length===2) scoresT = t; // [1,N]
-      }
-    }
-    return {boxesT, scoresT, numT};
-  }
-
+  /* === 偵測（保留，若模型未對齊會顯示 0） === */
   async function detectOnce(){
     if(!modelLoaded) throw new Error('模型尚未載入');
     if(!stream) throw new Error('相機尚未啟動');
 
-    // 更新 canvas 尺寸
-    canvas.width = video.videoWidth || canvas.width;
-    canvas.height = video.videoHeight || canvas.height;
+    canvas.width = video.videoWidth||canvas.width;
+    canvas.height = video.videoHeight||canvas.height;
+    clearCanvas(); drawFrame();
 
-    clearCanvas();
-    drawFrame();
+    const size = inferSize(), threshold = thr();
+    setStatus(`推論中… size=${size} thr=${threshold}`);
 
-    const threshold = thr();
-    const size = inferSize();
-    setStatus(`推論中… thr=${threshold} size=${size}`);
-
-    const result = await tf.tidy(async () => {
+    const result = await tf.tidy(async()=>{
       const img = tf.browser.fromPixels(canvas).toFloat();
-      const resized = tf.image.resizeBilinear(img, [size, size], true);
+      const resized = tf.image.resizeBilinear(img,[size,size],true);
       const input = resized.div(255).expandDims(0);
-
       const out = await model.executeAsync(input);
-      const {boxesT, scoresT, numT} = pickOutputs(out);
-
-      if(!boxesT || !scoresT){
-        // 印 shapes 方便你對模型
-        if(Array.isArray(out)){
-          log('❌ 無法推斷 boxes/scores。Array outputs shapes:');
-          out.forEach((t,i)=>log(`  [${i}] shape=`, t.shape));
-        }else{
-          log('❌ 無法推斷 boxes/scores。Named outputs shapes:');
-          Object.entries(out).forEach(([k,t])=>log(`  ${k} shape=`, t.shape));
-        }
-        disposeOut(out);
-        throw new Error('模型輸出不是常見偵測格式（看 log 的 outputs/keys/shape）');
-      }
-
+      const boxesT = out['detection_boxes']||out[0];
+      const scoresT= out['detection_scores']||out[1];
       const boxesArr = await boxesT.array();
-      const scoresArr = await scoresT.array();
-      const numArr = numT ? await numT.array() : null;
-
-      disposeOut(out);
-
-      const boxes = (Array.isArray(boxesArr[0]) && Array.isArray(boxesArr[0][0])) ? boxesArr[0] : boxesArr;
-      const scores = (Array.isArray(scoresArr[0])) ? scoresArr[0] : scoresArr;
-      const num = (numArr && Array.isArray(numArr)) ? Number(numArr[0]) : null;
-
-      return {boxes, scores, num, threshold};
+      const scoresArr= await scoresT.array();
+      if(Array.isArray(out)) out.forEach(t=>t.dispose&&t.dispose());
+      else Object.values(out).forEach(t=>t.dispose&&t.dispose());
+      const boxes = (Array.isArray(boxesArr[0])&&Array.isArray(boxesArr[0][0]))?boxesArr[0]:boxesArr;
+      const scores=(Array.isArray(scoresArr[0]))?scoresArr[0]:scoresArr;
+      return {boxes,scores};
     });
 
-    // 畫框
-    clearCanvas();
-    drawFrame();
-
-    const {boxes, scores, num, threshold} = result;
-    const N = num ? Math.min(num, boxes.length, scores.length) : Math.min(boxes.length, scores.length);
-
-    let count = 0;
-    for(let i=0;i<N;i++){
-      const sc = scores[i];
-      if(sc >= threshold){
-        count++;
-        drawBox(boxes[i], sc);
-      }
+    clearCanvas(); drawFrame();
+    let count=0;
+    for(let i=0;i<result.scores.length;i++){
+      if(result.scores[i]>=threshold) count++;
     }
-
-    countDiv.textContent = '偵測到藥粒數量：' + count;
-    setStatus(`完成 ✅ 偵測 ${count} 顆（候選 ${N}）`);
+    countDiv.textContent='偵測到藥粒數量：'+count;
+    setStatus('完成');
   }
 
-  // ===== 事件 =====
-  startBtn.addEventListener('click', async () => {
-    startBtn.disabled = true;
+  /* === 事件（用 onclick，最保守） === */
+  startBtn.onclick = async ()=>{
     try{
-      // iOS 最保守版本
       await startCameraIOSSafe();
-
-      // 第一次啟動時載模型
       if(!modelLoaded) await loadModel();
     }catch(e){
-      log('❌ startCamera error:', {name:e.name, message:e.message});
-      alert('相機啟動失敗：\n'+(e.name||'Error')+'\n'+e.message);
+      alert('相機啟動失敗：'+e.message);
       setStatus('相機啟動失敗');
-    }finally{
-      startBtn.disabled = false;
     }
-  });
+  };
+  stopBtn.onclick = ()=>{ stopCamera(); setStatus('相機已停止'); };
+  scanBtn.onclick = async ()=>{ try{ await detectOnce(); }catch(e){ alert(e.message); } };
 
-  stopBtn.addEventListener('click', () => {
-    stopCamera();
-    setStatus('相機已停止');
-  });
-
-  scanBtn.addEventListener('click', async () => {
-    scanBtn.disabled = true;
+  testBtn.onclick = async ()=>{
+    alert('你有按到「測試權限」');
     try{
-      await detectOnce();
+      const s = await navigator.mediaDevices.getUserMedia({video:true,audio:false});
+      s.getTracks().forEach(t=>t.stop());
+      alert('getUserMedia 成功（權限 OK）');
     }catch(e){
-      log('❌ detect error:', {name:e.name, message:e.message});
-      alert('推論失敗：\n'+e.message);
-      setStatus('推論失敗');
-    }finally{
-      scanBtn.disabled = false;
+      alert('getUserMedia 失敗：'+(e.name||'Error'));
     }
-  });
+  };
 
-  // 測試權限：只測 getUserMedia 是否會被呼叫/回錯誤
-  testBtn.addEventListener('click', async () => {
-    try{
-      if(!isSecureOK()) throw new Error('不是 HTTPS/localhost：'+location.href);
-      const tmp = await navigator.mediaDevices.getUserMedia({video:true, audio:false});
-      tmp.getTracks().forEach(t=>t.stop());
-      alert('✅ 權限/相機可用（getUserMedia 成功）');
-    }catch(e){
-      log('❌ permission test:', {name:e.name, message:e.message});
-      alert('❌ getUserMedia 失敗：\n'+(e.name||'Error')+'\n'+e.message);
-    }
-  });
-
-  // 初始化提示
-  (function init(){
-    log('提示：GitHub Pages (HTTPS) OK；iOS 需要 muted + playsinline + 手動 video.play()');
-    if(!isSecureOK()) log('⚠️ 目前不是 HTTPS/localhost：', location.href);
-    setStatus('尚未啟動');
-  })();
+  /* 初始化 */
+  alert('JS 已載入（看到這個代表 script 正常）');
+  setStatus('尚未啟動');
 </script>
-  </script>
-
-  <!-- 👇👇👇 從這裡貼上我給你的測試碼 👇👇👇 -->
-  <script>
-    alert("JS 已載入（看到這個代表 script 正常）");
-
-    const testBtn = document.getElementById('testBtn');
-    const logEl = document.getElementById('log');
-
-    function log2(msg){
-      console.log(msg);
-      if (logEl) logEl.textContent = msg + "\n" + (logEl.textContent || "");
-    }
-
-    if (!testBtn) {
-      alert("❌ 找不到『測試權限』按鈕（id=testBtn）");
-    } else {
-      testBtn.onclick = async () => {
-        alert("✅ 你有按到『測試權限』按鈕");
-
-        try {
-          const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-          s.getTracks().forEach(t => t.stop());
-          alert("✅ getUserMedia 成功（Safari 已允許相機）");
-        } catch (e) {
-          alert("❌ getUserMedia 失敗：" + (e.name || "Error") + "\n" + e.message);
-        }
-      };
-    }
-  </script>
-  <!-- 👆👆👆 貼到這裡 👆👆👆 -->
-
 </body>
 </html>
-
