@@ -5,34 +5,47 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>藥粒計數 WebApp (AI版)</title>
   <style>
-    body { font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 12px; }
-    .wrap { max-width: 520px; margin: 0 auto; }
-    h1 { margin: 8px 0 12px; font-size: 22px; }
-    .panel { border: 1px solid #ddd; border-radius: 12px; padding: 10px; margin: 10px 0; }
-    video, canvas { width: 100%; max-width: 480px; border-radius: 10px; }
-    #count { font-size: 18px; color: #0b3d91; margin-top: 10px; font-weight: 700; }
+    body { font-family: Arial, sans-serif; margin: 0; padding: 14px; background:#fafafa; }
+    .wrap { max-width: 720px; margin: 0 auto; }
+    h1 { text-align: center; margin: 8px 0 14px; font-size: 24px; }
+    .panel { background:#fff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 12px; margin: 12px 0; }
+    .stage { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 720px) { .stage { grid-template-columns: 1fr; } }
+    video, canvas { width: 100%; border-radius: 12px; background: #111827; }
+    .row { display:flex; gap:10px; flex-wrap: wrap; justify-content:center; margin-top: 10px; }
     button {
-      font-size: 16px; padding: 10px 14px; margin: 8px 6px;
-      border-radius: 10px; border: 1px solid #ccc; background: #fff; cursor: pointer;
+      font-size: 16px; padding: 10px 14px; border-radius: 12px;
+      border: 1px solid #d1d5db; background:#fff; cursor:pointer;
     }
-    button.primary { border-color: #0b3d91; }
-    button:disabled { opacity: .45; cursor: not-allowed; }
-    .row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
-    .small { font-size: 12px; color: #666; text-align: left; line-height: 1.4; }
-    .kv { display: grid; grid-template-columns: 110px 1fr; gap: 6px 10px; text-align: left; }
-    input[type="number"]{ width: 90px; padding: 6px; border-radius: 8px; border: 1px solid #ccc; }
-    select{ padding: 6px; border-radius: 8px; border: 1px solid #ccc; }
-    code { background: #f6f6f6; padding: 2px 6px; border-radius: 6px; }
-    #log { white-space: pre-wrap; text-align: left; background: #0b1020; color: #d7e1ff; padding: 10px; border-radius: 10px; font-size: 12px; max-height: 220px; overflow: auto; }
+    button.primary { border-color:#1d4ed8; color:#1d4ed8; font-weight:700; }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    #count { text-align:center; font-size: 22px; font-weight: 800; color:#1d4ed8; margin-top: 12px; }
+    .kv { display:grid; grid-template-columns: 110px 1fr; gap: 8px 10px; align-items:center; }
+    input[type="number"]{ width: 110px; padding: 8px; border-radius: 10px; border: 1px solid #d1d5db; }
+    select{ padding: 8px; border-radius: 10px; border: 1px solid #d1d5db; }
+    code { background:#f3f4f6; padding: 3px 8px; border-radius: 8px; }
+    .small { font-size: 12px; color:#6b7280; line-height:1.45; }
+    #log { white-space: pre-wrap; background:#0b1020; color:#dbeafe; padding: 10px; border-radius: 12px; max-height: 240px; overflow:auto; font-size: 12px; }
+    .badge { display:inline-block; padding: 4px 10px; border-radius: 999px; background:#eef2ff; color:#3730a3; font-weight:700; }
   </style>
 </head>
+
 <body>
   <div class="wrap">
     <h1>💊 藥粒計數 WebApp (AI版)</h1>
 
     <div class="panel">
-      <video id="video" autoplay playsinline muted></video>
-      <canvas id="canvas"></canvas>
+      <div class="stage">
+        <div>
+          <div class="small"><span class="badge">即時相機</span></div>
+          <!-- iOS 必備：muted + playsinline，並且用 JS 手動 video.play() -->
+          <video id="video" autoplay playsinline muted></video>
+        </div>
+        <div>
+          <div class="small"><span class="badge">掃描結果</span></div>
+          <canvas id="canvas"></canvas>
+        </div>
+      </div>
 
       <div class="row">
         <button id="startBtn" class="primary">🎥 啟動相機</button>
@@ -46,12 +59,12 @@
     <div class="panel">
       <div class="kv">
         <div>模型路徑</div>
-        <div><code>pill-model/model.json</code></div>
+        <div><code id="modelPath">pill-model/model.json</code></div>
 
         <div>信心閾值</div>
         <div>
           <input id="thr" type="number" min="0" max="1" step="0.05" value="0.50" />
-          <span class="small">（0~1，越高越嚴格）</span>
+          <span class="small">（0~1，越高越嚴格；小物件建議 0.2~0.4）</span>
         </div>
 
         <div>推論尺寸</div>
@@ -62,7 +75,7 @@
             <option value="512" selected>512</option>
             <option value="640">640</option>
           </select>
-          <span class="small">（會先 resize 再丟模型，通常 512/640 較準但較慢）</span>
+          <span class="small">（先 resize 再送模型；512/640 通常較準較慢）</span>
         </div>
 
         <div>狀態</div>
@@ -72,29 +85,29 @@
 
     <div class="panel">
       <div class="small">
-        常見限制：相機需要 <b>HTTPS 或 localhost</b>；模型必須是「物件偵測」類型（能輸出 boxes/scores）。
-        若你不確定模型輸出，按一次掃描後到下面 log 看 outputs 形狀/名稱。
+        常見限制：相機需要 <b>HTTPS</b> 或 <b>localhost</b>；模型必須是「物件偵測」類型（能輸出 boxes/scores）。
+        若偵測一直是 0，請看下面 log 的 outputs 名稱/shape 來對應模型輸出。
       </div>
       <div id="log"></div>
     </div>
   </div>
 
-  <!-- TensorFlow.js -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
 
   <script>
     // ===== DOM =====
-    const video   = document.getElementById('video');
-    const canvas  = document.getElementById('canvas');
-    const ctx     = canvas.getContext('2d');
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
     const startBtn = document.getElementById('startBtn');
-    const scanBtn  = document.getElementById('scanBtn');
-    const stopBtn  = document.getElementById('stopBtn');
+    const scanBtn = document.getElementById('scanBtn');
+    const stopBtn = document.getElementById('stopBtn');
     const countDiv = document.getElementById('count');
     const statusEl = document.getElementById('status');
-    const thrEl    = document.getElementById('thr');
+    const thrEl = document.getElementById('thr');
     const inferSizeEl = document.getElementById('inferSize');
-    const logEl    = document.getElementById('log');
+    const logEl = document.getElementById('log');
+    const modelPathEl = document.getElementById('modelPath');
 
     // ===== 狀態 =====
     let stream = null;
@@ -104,27 +117,23 @@
     function log(...args) {
       const msg = args.map(x => (typeof x === 'string' ? x : JSON.stringify(x, null, 2))).join(' ');
       console.log(...args);
-      logEl.textContent = (msg + "\n") + logEl.textContent;
+      logEl.textContent = msg + "\n" + logEl.textContent;
     }
-
     function setStatus(s) { statusEl.textContent = s; }
 
     function isSecureOK() {
-      // 相機在大多數瀏覽器要求 https 或 localhost
       const isLocalhost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
       return location.protocol === 'https:' || isLocalhost;
     }
 
-    function clearOverlay() {
+    function clearCanvas() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
-
-    function drawFrameFromVideo() {
+    function drawFrame() {
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     }
-
     function drawBox(box, score) {
-      // box: [ymin, xmin, ymax, xmax] (normalized 0~1)
+      // box: [ymin, xmin, ymax, xmax] normalized 0~1
       const [ymin, xmin, ymax, xmax] = box;
       const x = xmin * canvas.width;
       const y = ymin * canvas.height;
@@ -137,8 +146,16 @@
 
       ctx.fillStyle = "red";
       ctx.font = "16px Arial";
-      const label = (score * 100).toFixed(1) + "%";
-      ctx.fillText(label, x + 4, Math.max(18, y + 18));
+      ctx.fillText((score * 100).toFixed(1) + "%", x + 4, Math.max(18, y + 18));
+    }
+
+    function threshold() {
+      const v = Number(thrEl.value);
+      return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0.5;
+    }
+    function inferSize() {
+      const v = Number(inferSizeEl.value);
+      return Number.isFinite(v) ? v : 512;
     }
 
     async function waitVideoReady() {
@@ -148,32 +165,52 @@
       });
     }
 
-    // ===== 相機 =====
+    // ===== 相機（iOS 必過）=====
     async function startCamera() {
       if (!navigator.mediaDevices?.getUserMedia) {
         throw new Error("此瀏覽器不支援 getUserMedia()");
       }
       if (!isSecureOK()) {
-        throw new Error("相機需要 HTTPS 或 localhost。請用 https 部署或在本機 localhost 開。");
+        throw new Error("相機需要 HTTPS 或 localhost。你目前是：" + location.href);
       }
 
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" } },
-        audio: false
-      });
-      video.srcObject = stream;
-      await waitVideoReady();
+      setStatus("啟動相機中…");
 
-      // 設定 canvas 尺寸跟著 video
-      canvas.width  = video.videoWidth;
-      canvas.height = video.videoHeight;
+      // 先停掉舊的
+      stopCamera();
 
-      clearOverlay();
-      drawFrameFromVideo();
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" } },
+          audio: false
+        });
 
-      setStatus(`相機已啟動：${canvas.width}x${canvas.height}`);
-      scanBtn.disabled = !modelLoaded;
-      stopBtn.disabled = false;
+        video.srcObject = stream;
+
+        // 等 metadata 出來
+        await waitVideoReady();
+
+        // ⭐ iOS 關鍵：必須手動 play
+        await video.play();
+
+        // 設定 canvas 尺寸
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+
+        clearCanvas();
+        drawFrame();
+
+        setStatus(`相機已啟動：${canvas.width} x ${canvas.height}`);
+
+        stopBtn.disabled = false;
+        scanBtn.disabled = !modelLoaded;
+
+      } catch (e) {
+        // 常見：NotAllowedError / NotFoundError / NotReadableError / SecurityError
+        log("❌ Camera error:", { name: e.name, message: e.message });
+        setStatus("相機啟動失敗");
+        throw e;
+      }
     }
 
     function stopCamera() {
@@ -182,21 +219,18 @@
         stream = null;
       }
       video.srcObject = null;
-      setStatus("相機已停止");
-      scanBtn.disabled = true;
       stopBtn.disabled = true;
+      scanBtn.disabled = true;
     }
 
     // ===== 模型 =====
     async function loadModel() {
       setStatus("載入模型中…");
-      // 你模型的路徑（同網域）
-      const path = 'pill-model/model.json';
+      const path = modelPathEl.textContent.trim();
 
       model = await tf.loadGraphModel(path);
       modelLoaded = true;
 
-      // 印出 inputs/outputs 以便對應
       const ins = model.inputs.map(i => ({ name: i.name, shape: i.shape, dtype: i.dtype }));
       const outs = model.outputs.map(o => ({ name: o.name, shape: o.shape, dtype: o.dtype }));
       log("✅ 模型載入完成");
@@ -204,52 +238,7 @@
       log("outputs:", outs);
 
       setStatus("模型載入完成");
-      scanBtn.disabled = !stream; // 要有相機才可掃描
-    }
-
-    function getThreshold() {
-      const v = Number(thrEl.value);
-      if (Number.isFinite(v)) return Math.min(1, Math.max(0, v));
-      return 0.5;
-    }
-
-    function getInferSize() {
-      const v = Number(inferSizeEl.value);
-      return Number.isFinite(v) ? v : 512;
-    }
-
-    // ===== 從輸出抽 boxes/scores/num =====
-    function pickOutputs(out) {
-      // out 可能是 Array<Tensor> 或 NamedTensorMap
-      let boxesT = null, scoresT = null, numT = null;
-
-      if (Array.isArray(out)) {
-        // 常見：out[0]=boxes, out[1]=scores, out[2]=classes, out[3]=num
-        boxesT = out[0] || null;
-        scoresT = out[1] || null;
-        numT = out[3] || null;
-        return { boxesT, scoresT, numT };
-      }
-
-      // 常見 TF2 OD API
-      boxesT  = out['detection_boxes']  || out['TFLite_Detection_PostProcess']    || null;
-      scoresT = out['detection_scores'] || out['TFLite_Detection_PostProcess:1']  || null;
-      numT    = out['num_detections']   || out['TFLite_Detection_PostProcess:3']  || null;
-
-      // fallback：用 shape 猜（[1,N,4] 當 boxes，[1,N] 當 scores）
-      if (!boxesT || !scoresT) {
-        const keys = Object.keys(out);
-        log("ℹ️ output keys:", keys);
-
-        for (const k of keys) {
-          const t = out[k];
-          const s = t?.shape || [];
-          if (!boxesT && s.length === 3 && s[s.length - 1] === 4) boxesT = t;
-          if (!scoresT && s.length === 2) scoresT = t;
-        }
-      }
-
-      return { boxesT, scoresT, numT };
+      scanBtn.disabled = !stream; // 有相機才開放掃描
     }
 
     function disposeOut(out) {
@@ -257,34 +246,62 @@
       else Object.values(out).forEach(t => t?.dispose?.());
     }
 
-    // ===== 推論 =====
+    // 抽取 boxes/scores/num（相容 TF2 OD API / TFLite postprocess / fallback）
+    function pickOutputs(out) {
+      let boxesT = null, scoresT = null, numT = null;
+
+      if (Array.isArray(out)) {
+        boxesT = out[0] || null;
+        scoresT = out[1] || null;
+        numT = out[3] || null;
+        return { boxesT, scoresT, numT };
+      }
+
+      boxesT  = out['detection_boxes']  || out['TFLite_Detection_PostProcess']    || null;
+      scoresT = out['detection_scores'] || out['TFLite_Detection_PostProcess:1']  || null;
+      numT    = out['num_detections']   || out['TFLite_Detection_PostProcess:3']  || null;
+
+      if (!boxesT || !scoresT) {
+        const keys = Object.keys(out);
+        log("ℹ️ output keys:", keys);
+        for (const k of keys) {
+          const t = out[k];
+          const s = t?.shape || [];
+          if (!boxesT && s.length === 3 && s[s.length - 1] === 4) boxesT = t; // [1,N,4]
+          if (!scoresT && s.length === 2) scoresT = t; // [1,N]
+        }
+      }
+
+      return { boxesT, scoresT, numT };
+    }
+
     async function detectOnce() {
       if (!modelLoaded) throw new Error("模型尚未載入");
       if (!stream) throw new Error("相機尚未啟動");
 
-      // 以目前 video 畫面為基準
-      canvas.width  = video.videoWidth;
+      // 確保尺寸正確
+      canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
-      clearOverlay();
-      drawFrameFromVideo();
 
-      const threshold = getThreshold();
-      const inferSize = getInferSize();
+      clearCanvas();
+      drawFrame();
 
-      setStatus(`推論中… threshold=${threshold} size=${inferSize}`);
+      const thr = threshold();
+      const size = inferSize();
 
-      // 用 tf.tidy 控制記憶體
+      setStatus(`推論中… thr=${thr} size=${size}`);
+
       const result = await tf.tidy(async () => {
-        // 從 canvas 取像素 → resize 到模型推論尺寸 → normalize
+        // 從 canvas 擷取 -> resize -> normalize -> [1,H,W,3]
         const img = tf.browser.fromPixels(canvas).toFloat();
-        const resized = tf.image.resizeBilinear(img, [inferSize, inferSize], true);
-        const input = resized.div(255).expandDims(0); // [1, H, W, 3]
+        const resized = tf.image.resizeBilinear(img, [size, size], true);
+        const input = resized.div(255).expandDims(0);
 
         const out = await model.executeAsync(input);
         const { boxesT, scoresT, numT } = pickOutputs(out);
 
         if (!boxesT || !scoresT) {
-          // 印出所有 shape 幫你 debug
+          // 印 shapes 讓你 debug
           if (Array.isArray(out)) {
             log("❌ 無法推斷 boxes/scores。Array outputs shapes:");
             out.forEach((t, i) => log(`  [${i}] shape=`, t.shape));
@@ -296,31 +313,30 @@
           throw new Error("模型輸出不是常見偵測格式，請看 log 的 outputs/keys/shape 來對應。");
         }
 
-        const boxesArr = await boxesT.array();   // 可能 [1,N,4] 或 [N,4]
-        const scoresArr = await scoresT.array(); // 可能 [1,N] 或 [N]
+        const boxesArr = await boxesT.array();
+        const scoresArr = await scoresT.array();
         const numArr = numT ? await numT.array() : null;
 
         disposeOut(out);
 
-        // 去 batch 維度
         const boxes = (Array.isArray(boxesArr[0]) && Array.isArray(boxesArr[0][0])) ? boxesArr[0] : boxesArr;
         const scores = (Array.isArray(scoresArr[0])) ? scoresArr[0] : scoresArr;
         const num = (numArr && Array.isArray(numArr)) ? Number(numArr[0]) : null;
 
-        return { boxes, scores, num, threshold };
+        return { boxes, scores, num, thr };
       });
 
-      // 重新畫底圖（因為 tidy 結束後我們要在原尺寸畫框）
-      clearOverlay();
-      drawFrameFromVideo();
+      // 畫框（回到原尺寸）
+      clearCanvas();
+      drawFrame();
 
-      const { boxes, scores, num, threshold } = result;
-      const N = num ? Math.min(num, scores.length, boxes.length) : Math.min(scores.length, boxes.length);
+      const { boxes, scores, num, thr } = result;
+      const N = num ? Math.min(num, boxes.length, scores.length) : Math.min(boxes.length, scores.length);
 
       let pillCount = 0;
       for (let i = 0; i < N; i++) {
         const sc = scores[i];
-        if (sc >= threshold) {
+        if (sc >= thr) {
           pillCount++;
           drawBox(boxes[i], sc);
         }
@@ -332,25 +348,21 @@
 
     // ===== 事件 =====
     startBtn.addEventListener('click', async () => {
+      startBtn.disabled = true;
       try {
-        startBtn.disabled = true;
-        setStatus("啟動中…");
         await startCamera();
-
-        // 第一次啟動時載入模型（也可改成頁面一開始就載）
+        // 第一次啟動時載模型（也可改成頁面一開始就載）
         if (!modelLoaded) await loadModel();
-
-        startBtn.disabled = false;
       } catch (e) {
+        alert("相機啟動失敗：\n" + e.name + "\n" + e.message);
+      } finally {
         startBtn.disabled = false;
-        log("❌", e.message);
-        alert(e.message);
-        setStatus("啟動失敗");
       }
     });
 
     stopBtn.addEventListener('click', () => {
       stopCamera();
+      setStatus("相機已停止");
     });
 
     scanBtn.addEventListener('click', async () => {
@@ -358,21 +370,19 @@
       try {
         await detectOnce();
       } catch (e) {
-        log("❌", e.message);
-        alert("推論失敗：" + e.message);
+        log("❌ Detect error:", { name: e.name, message: e.message });
+        alert("推論失敗：\n" + e.message);
         setStatus("推論失敗");
       } finally {
         scanBtn.disabled = false;
       }
     });
 
-    // 頁面載入提示
-    (function initHint() {
-      log("提示：相機需 HTTPS/localhost；模型需放在 pill-model/model.json");
-      if (!isSecureOK()) {
-        log("⚠️ 目前不是 HTTPS/localhost，啟動相機可能會失敗。");
-      }
-      setStatus("請按「啟動相機」");
+    // ===== 提示 =====
+    (function init() {
+      log("提示：相機需 HTTPS/localhost；iOS 需要 muted + playsinline + 手動 video.play()");
+      if (!isSecureOK()) log("⚠️ 目前不是 HTTPS/localhost，iPhone 可能無法啟動相機。");
+      setStatus("尚未啟動");
     })();
   </script>
 </body>
