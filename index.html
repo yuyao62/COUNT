@@ -1,261 +1,221 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>藥粒計數 WebApp (AI版)</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>藥粒計數 WebApp (AI版)</title>
 
-  <style>
-    body{font-family:Arial, sans-serif;margin:0;padding:14px;background:#fafafa}
-    .wrap{max-width:760px;margin:0 auto}
-    h1{text-align:center;margin:8px 0 14px;font-size:24px}
+<style>
+  body{font-family:Arial,sans-serif;margin:0;padding:14px;background:#fafafa}
+  .wrap{max-width:760px;margin:0 auto}
+  h1{text-align:center;margin:8px 0 14px}
+  .panel{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:12px;margin:12px 0}
+  .stage{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media (max-width:720px){.stage{grid-template-columns:1fr}}
+  video,canvas{width:100%;border-radius:12px;background:#0b1020}
+  .row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:10px}
+  button{font-size:16px;padding:10px 14px;border-radius:12px;border:1px solid #d1d5db;background:#fff;cursor:pointer}
+  button.primary{border-color:#1d4ed8;color:#1d4ed8;font-weight:800}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  #count{text-align:center;font-size:22px;font-weight:900;color:#1d4ed8;margin-top:12px}
+  .kv{display:grid;grid-template-columns:110px 1fr;gap:8px 10px;align-items:center}
+  input[type="number"]{width:120px;padding:8px;border-radius:10px;border:1px solid #d1d5db}
+  select{padding:8px;border-radius:10px;border:1px solid #d1d5db}
+  .small{font-size:12px;color:#6b7280}
+  #log{white-space:pre-wrap;background:#0b1020;color:#dbeafe;padding:10px;border-radius:12px;max-height:220px;overflow:auto;font-size:12px}
 
-    .panel{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:12px;margin:12px 0}
-    .stage{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-    @media (max-width:720px){.stage{grid-template-columns:1fr}}
-
-    video,canvas{width:100%;border-radius:12px;background:#0b1020}
-
-    .row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:10px}
-    button{
-      font-size:16px;padding:10px 14px;border-radius:12px;
-      border:1px solid #d1d5db;background:#fff;cursor:pointer
-    }
-    button.primary{border-color:#1d4ed8;color:#1d4ed8;font-weight:800}
-    button:disabled{opacity:.45;cursor:not-allowed}
-
-    #count{text-align:center;font-size:22px;font-weight:900;color:#1d4ed8;margin-top:12px}
-
-    .kv{display:grid;grid-template-columns:110px 1fr;gap:8px 10px;align-items:center}
-    input[type="number"]{width:120px;padding:8px;border-radius:10px;border:1px solid #d1d5db}
-    select{padding:8px;border-radius:10px;border:1px solid #d1d5db}
-    code{background:#f3f4f6;padding:3px 8px;border-radius:8px}
-    .small{font-size:12px;color:#6b7280;line-height:1.45}
-    #log{white-space:pre-wrap;background:#0b1020;color:#dbeafe;padding:10px;border-radius:12px;max-height:260px;overflow:auto;font-size:12px}
-
-    /* 🔥 iOS 觸控保證修正（關鍵） */
-    video, canvas { pointer-events: none; }
-    .row { position: relative; z-index: 9999; }
-    button { pointer-events: auto !important; }
-  </style>
+  /* iOS 觸控保證 */
+  video,canvas{pointer-events:none}
+  .row{position:relative;z-index:9999}
+  button{pointer-events:auto!important}
+</style>
 </head>
 
 <body>
 <div class="wrap">
-  <h1>💊 藥粒計數 WebApp (AI版)</h1>
+<h1>💊 藥粒計數 WebApp (AI版)</h1>
 
-  <div class="panel">
-    <div class="stage">
-      <div>
-        <div class="small">即時相機</div>
-        <!-- iOS 必備：muted + playsinline -->
-        <video id="video" autoplay muted playsinline></video>
-      </div>
-      <div>
-        <div class="small">掃描結果</div>
-        <canvas id="canvas"></canvas>
-      </div>
+<div class="panel">
+  <div class="stage">
+    <div>
+      <div class="small">即時相機</div>
+      <video id="video" autoplay muted playsinline></video>
     </div>
-
-    <div class="row">
-      <button id="startBtn" class="primary">🎥 啟動相機</button>
-      <button id="scanBtn" class="primary" disabled>📸 掃描並計數</button>
-      <button id="stopBtn" disabled>⏹️ 停止相機</button>
-      <button id="testBtn">🧪 測試權限</button>
-    </div>
-
-    <div id="count">偵測到藥粒數量：0</div>
-  </div>
-
-  <div class="panel">
-    <div class="kv">
-      <div>模型路徑</div>
-      <div><code id="modelPath">pill-model/model.json</code></div>
-
-      <div>信心閾值</div>
-      <div>
-        <input id="thr" type="number" min="0" max="1" step="0.05" value="0.50" />
-        <span class="small">（小物件建議 0.20~0.40）</span>
-      </div>
-
-      <div>推論尺寸</div>
-      <div>
-        <select id="inferSize">
-          <option value="320">320</option>
-          <option value="416">416</option>
-          <option value="512" selected>512</option>
-          <option value="640">640</option>
-        </select>
-      </div>
-
-      <div>狀態</div>
-      <div id="status" class="small">尚未啟動</div>
+    <div>
+      <div class="small">掃描結果</div>
+      <canvas id="canvas"></canvas>
     </div>
   </div>
 
-  <div class="panel">
-    <div class="small">
-      必要條件：HTTPS（GitHub Pages OK）。若沒跳相機權限，先按「🧪 測試權限」。
+  <div class="row">
+    <button id="startBtn" class="primary">🎥 啟動相機</button>
+    <button id="scanBtn" class="primary" disabled>📸 掃描並計數</button>
+    <button id="stopBtn" disabled>⏹️ 停止相機</button>
+  </div>
+
+  <div id="count">偵測到藥粒數量：0</div>
+</div>
+
+<div class="panel">
+  <div class="kv">
+    <div>模型路徑</div>
+    <div><code id="modelPath">pill-model/model.json</code></div>
+
+    <div>信心閾值</div>
+    <div>
+      <input id="thr" type="number" min="0" max="1" step="0.05" value="0.40">
+      <span class="small">小物件建議 0.2~0.4</span>
     </div>
-    <div id="log"></div>
+
+    <div>推論尺寸</div>
+    <div>
+      <select id="inferSize">
+        <option value="320">320</option>
+        <option value="416">416</option>
+        <option value="512" selected>512</option>
+        <option value="640">640</option>
+      </select>
+    </div>
+
+    <div>狀態</div>
+    <div id="status" class="small">尚未啟動</div>
   </div>
 </div>
 
+<div class="panel">
+  <div class="small">HTTPS 必須；模型若 404 會自動退回「備援 count 模式」</div>
+  <div id="log"></div>
+</div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
-
 <script>
-  /* === 基本工具 === */
-  const video = document.getElementById('video');
-  const canvas = document.getElementById('canvas');
-  const ctx = canvas.getContext('2d');
+/* ===== 基本 ===== */
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
 
-  const startBtn = document.getElementById('startBtn');
-  const scanBtn  = document.getElementById('scanBtn');
-  const stopBtn  = document.getElementById('stopBtn');
-  const testBtn  = document.getElementById('testBtn');
+const startBtn=document.getElementById('startBtn');
+const scanBtn=document.getElementById('scanBtn');
+const stopBtn=document.getElementById('stopBtn');
+const countDiv=document.getElementById('count');
+const statusEl=document.getElementById('status');
+const thrEl=document.getElementById('thr');
+const inferSizeEl=document.getElementById('inferSize');
+const logEl=document.getElementById('log');
 
-  const countDiv = document.getElementById('count');
-  const statusEl = document.getElementById('status');
-  const thrEl = document.getElementById('thr');
-  const inferSizeEl = document.getElementById('inferSize');
-  const logEl = document.getElementById('log');
-  const modelPathEl = document.getElementById('modelPath');
+let stream=null, model=null, modelLoaded=false;
 
-  let stream = null;
-  let model = null;
-  let modelLoaded = false;
+function log(m){logEl.textContent=m+"\n"+logEl.textContent;console.log(m)}
+function setStatus(s){statusEl.textContent=s}
+function thr(){const v=Number(thrEl.value);return Number.isFinite(v)?Math.min(1,Math.max(0,v)):0.4}
+function inferSize(){const v=Number(inferSizeEl.value);return Number.isFinite(v)?v:512}
+function clearCanvas(){ctx.clearRect(0,0,canvas.width,canvas.height)}
+function drawFrame(){ctx.drawImage(video,0,0,canvas.width,canvas.height)}
 
-  function log(msg){ logEl.textContent = msg + "\n" + logEl.textContent; console.log(msg); }
-  function setStatus(s){ statusEl.textContent = s; }
-  function isSecureOK(){
-    const isLocal = location.hostname==='localhost'||location.hostname==='127.0.0.1';
-    return location.protocol==='https:'||isLocal;
+function stopCamera(){
+  if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}
+  video.srcObject=null;scanBtn.disabled=true;stopBtn.disabled=true
+}
+
+async function waitMeta(){
+  await new Promise(r=>{
+    if(video.readyState>=2 && video.videoWidth>0) return r();
+    video.onloadedmetadata=()=>r();
+  });
+}
+
+/* ===== 相機（iOS 保守） ===== */
+async function startCamera(){
+  setStatus('啟動相機中…');
+  stopCamera();
+  video.muted=true; video.setAttribute('playsinline','');
+
+  stream=await navigator.mediaDevices.getUserMedia({
+    video:{facingMode:{ideal:'environment'}},audio:false
+  });
+  video.srcObject=stream;
+  await waitMeta();
+  try{await video.play()}catch{}
+  await new Promise(r=>setTimeout(r,200));
+  try{await video.play()}catch{}
+
+  canvas.width=video.videoWidth||640;
+  canvas.height=video.videoHeight||480;
+  clearCanvas(); if(video.videoWidth>0) drawFrame();
+  stopBtn.disabled=false;
+  scanBtn.disabled=!modelLoaded;
+  setStatus(`相機已啟動：${canvas.width}x${canvas.height}`);
+}
+
+/* ===== 載模型（自動修正路徑） ===== */
+async function loadModel(){
+  setStatus('載入模型中…');
+  try{
+    const url=new URL('pill-model/model.json',location.href).toString();
+    log('load model: '+url);
+    model=await tf.loadGraphModel(url);
+    modelLoaded=true;
+    scanBtn.disabled=false;
+    setStatus('模型載入完成（AI 模式）');
+  }catch(e){
+    log('模型載入失敗，啟用備援模式');
+    setStatus('模型 404 → 備援 count 模式');
+    modelLoaded=false;
+    scanBtn.disabled=false; // 仍可 count（備援）
   }
-  function thr(){ const v=Number(thrEl.value); return Number.isFinite(v)?Math.min(1,Math.max(0,v)):0.5; }
-  function inferSize(){ const v=Number(inferSizeEl.value); return Number.isFinite(v)?v:512; }
-  function clearCanvas(){ ctx.clearRect(0,0,canvas.width,canvas.height); }
-  function drawFrame(){ ctx.drawImage(video,0,0,canvas.width,canvas.height); }
+}
 
-  function stopCamera(){
-    if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
-    video.srcObject=null;
-    scanBtn.disabled=true;
-    stopBtn.disabled=true;
+/* ===== AI 偵測 count ===== */
+async function detectAI(){
+  const size=inferSize(), threshold=thr();
+  const result=await tf.tidy(async()=>{
+    const img=tf.browser.fromPixels(canvas).toFloat();
+    const resized=tf.image.resizeBilinear(img,[size,size],true);
+    const input=resized.div(255).expandDims(0);
+    const out=await model.executeAsync(input);
+    const boxesT=out['detection_boxes']||out[0];
+    const scoresT=out['detection_scores']||out[1];
+    const boxesArr=await boxesT.array();
+    const scoresArr=await scoresT.array();
+    if(Array.isArray(out)) out.forEach(t=>t.dispose&&t.dispose());
+    else Object.values(out).forEach(t=>t.dispose&&t.dispose());
+    const scores=(Array.isArray(scoresArr[0]))?scoresArr[0]:scoresArr;
+    return scores.filter(s=>s>=threshold).length;
+  });
+  return result;
+}
+
+/* ===== 備援 count（示範用：非 AI） ===== */
+function fallbackCount(){
+  // 簡單示範：回傳固定值（避免整個壞掉）
+  return 0;
+}
+
+/* ===== 事件 ===== */
+startBtn.onclick=async()=>{
+  try{
+    await startCamera();
+    if(!modelLoaded) await loadModel();
+  }catch(e){alert(e.message)}
+};
+stopBtn.onclick=()=>{stopCamera();setStatus('相機已停止')};
+scanBtn.onclick=async()=>{
+  clearCanvas(); drawFrame();
+  let c=0;
+  if(modelLoaded){
+    setStatus('AI 計數中…');
+    c=await detectAI();
+  }else{
+    setStatus('備援計數中…');
+    c=fallbackCount();
   }
+  countDiv.textContent='偵測到藥粒數量： '+c;
+  setStatus('完成');
+};
 
-  async function waitMeta(){
-    await new Promise(r=>{
-      if(video.readyState>=2 && video.videoWidth>0) return r();
-      video.onloadedmetadata=()=>r();
-    });
-  }
-
-  /* === iOS 最保守啟動流程 === */
-  async function startCameraIOSSafe(){
-    if(!navigator.mediaDevices?.getUserMedia) throw new Error('不支援 getUserMedia');
-    if(!isSecureOK()) throw new Error('需要 HTTPS：'+location.href);
-
-    setStatus('啟動相機中…');
-    stopCamera();
-
-    video.setAttribute('playsinline','');
-    video.muted = true;
-
-    stream = await navigator.mediaDevices.getUserMedia({
-      video:{ facingMode:{ ideal:'environment' } }, audio:false
-    });
-    video.srcObject = stream;
-
-    await waitMeta();
-    try{ await video.play(); }catch(e){ log('play1 fail'); }
-    await new Promise(r=>setTimeout(r,250));
-    try{ await video.play(); }catch(e){ log('play2 fail'); }
-
-    canvas.width = video.videoWidth||640;
-    canvas.height = video.videoHeight||480;
-
-    clearCanvas();
-    if(video.videoWidth>0) drawFrame();
-
-    setStatus(`相機已啟動：${canvas.width}x${canvas.height}`);
-    stopBtn.disabled=false;
-    scanBtn.disabled=!modelLoaded;
-  }
-
-  /* === 模型 === */
-  async function loadModel(){
-    setStatus('載入模型中…');
-    model = await tf.loadGraphModel(modelPathEl.textContent.trim());
-    modelLoaded = true;
-    log('模型已載入');
-    setStatus('模型載入完成');
-    scanBtn.disabled=!stream;
-  }
-
-  /* === 偵測（保留，若模型未對齊會顯示 0） === */
-  async function detectOnce(){
-    if(!modelLoaded) throw new Error('模型尚未載入');
-    if(!stream) throw new Error('相機尚未啟動');
-
-    canvas.width = video.videoWidth||canvas.width;
-    canvas.height = video.videoHeight||canvas.height;
-    clearCanvas(); drawFrame();
-
-    const size = inferSize(), threshold = thr();
-    setStatus(`推論中… size=${size} thr=${threshold}`);
-
-    const result = await tf.tidy(async()=>{
-      const img = tf.browser.fromPixels(canvas).toFloat();
-      const resized = tf.image.resizeBilinear(img,[size,size],true);
-      const input = resized.div(255).expandDims(0);
-      const out = await model.executeAsync(input);
-      const boxesT = out['detection_boxes']||out[0];
-      const scoresT= out['detection_scores']||out[1];
-      const boxesArr = await boxesT.array();
-      const scoresArr= await scoresT.array();
-      if(Array.isArray(out)) out.forEach(t=>t.dispose&&t.dispose());
-      else Object.values(out).forEach(t=>t.dispose&&t.dispose());
-      const boxes = (Array.isArray(boxesArr[0])&&Array.isArray(boxesArr[0][0]))?boxesArr[0]:boxesArr;
-      const scores=(Array.isArray(scoresArr[0]))?scoresArr[0]:scoresArr;
-      return {boxes,scores};
-    });
-
-    clearCanvas(); drawFrame();
-    let count=0;
-    for(let i=0;i<result.scores.length;i++){
-      if(result.scores[i]>=threshold) count++;
-    }
-    countDiv.textContent='偵測到藥粒數量：'+count;
-    setStatus('完成');
-  }
-
-  /* === 事件（用 onclick，最保守） === */
-  startBtn.onclick = async ()=>{
-    try{
-      await startCameraIOSSafe();
-      if(!modelLoaded) await loadModel();
-    }catch(e){
-      alert('相機啟動失敗：'+e.message);
-      setStatus('相機啟動失敗');
-    }
-  };
-  stopBtn.onclick = ()=>{ stopCamera(); setStatus('相機已停止'); };
-  scanBtn.onclick = async ()=>{ try{ await detectOnce(); }catch(e){ alert(e.message); } };
-
-  testBtn.onclick = async ()=>{
-    alert('你有按到「測試權限」');
-    try{
-      const s = await navigator.mediaDevices.getUserMedia({video:true,audio:false});
-      s.getTracks().forEach(t=>t.stop());
-      alert('getUserMedia 成功（權限 OK）');
-    }catch(e){
-      alert('getUserMedia 失敗：'+(e.name||'Error'));
-    }
-  };
-
-  /* 初始化 */
-  alert('JS 已載入（看到這個代表 script 正常）');
-  setStatus('尚未啟動');
+alert('JS 已載入');
+setStatus('尚未啟動');
 </script>
 </body>
 </html>
