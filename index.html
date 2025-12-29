@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <title>藥粒計數 WebApp</title>
+  <title>藥粒計數 WebApp (AI版)</title>
   <style>
     body { font-family: Arial, sans-serif; text-align: center; }
     video, canvas { width: 90%; max-width: 400px; margin: 10px; }
@@ -11,15 +11,17 @@
   </style>
 </head>
 <body>
-  <h1>📱 藥粒計數 WebApp</h1>
+  <h1>💊 藥粒計數 WebApp (AI版)</h1>
   <video id="video" autoplay playsinline></video>
   <canvas id="canvas"></canvas>
   <button id="scanBtn">📸 掃描並計數</button>
   <div id="count">偵測到藥粒數量：0</div>
 
-  <!-- 引入 OpenCV.js -->
-  <script async src="https://docs.opencv.org/4.x/opencv.js"></script>
+  <!-- 引入 TensorFlow.js -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <!-- 假設你有一個訓練好的模型 pill-model.json -->
   <script>
+    let model;
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
@@ -30,39 +32,48 @@
     navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
       .then(stream => { video.srcObject = stream; });
 
-    // 按下按鈕才做一次掃描
-    scanBtn.addEventListener('click', () => {
+    // 載入模型
+    async function loadModel() {
+      model = await tf.loadGraphModel('pill-model/model.json'); 
+      console.log("模型載入完成");
+    }
+    loadModel();
+
+    // 按下按鈕 → 拍照並分析
+    scanBtn.addEventListener('click', async () => {
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      let src = cv.imread(canvas);
-      let gray = new cv.Mat();
-      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
-      cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
-      cv.threshold(gray, gray, 120, 255, cv.THRESH_BINARY);
+      // 轉成 Tensor
+      let imgTensor = tf.browser.fromPixels(canvas).expandDims(0).toFloat().div(255);
 
-      let contours = new cv.MatVector();
-      let hierarchy = new cv.Mat();
-      cv.findContours(gray, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+      // 模型推論
+      const predictions = await model.executeAsync(imgTensor);
 
+      // 假設模型輸出是 [boxes, scores, classes]
+      const boxes = predictions[0].arraySync();
+      const scores = predictions[1].arraySync();
       let pillCount = 0;
-      for (let i = 0; i < contours.size(); i++) {
-        let cnt = contours.get(i);
-        let area = cv.contourArea(cnt);
-        // 篩選合理大小的藥粒
-        if (area > 500 && area < 5000) {
+
+      for (let i = 0; i < scores.length; i++) {
+        if (scores[i] > 0.5) { // 信心度閾值
           pillCount++;
-          cv.drawContours(src, contours, i, new cv.Scalar(255, 0, 0, 255), 2);
+          let [ymin, xmin, ymax, xmax] = boxes[i];
+          ctx.strokeStyle = "red";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(xmin * canvas.width, ymin * canvas.height,
+                         (xmax - xmin) * canvas.width, (ymax - ymin) * canvas.height);
         }
-        cnt.delete();
       }
 
-      cv.imshow(canvas, src);
       countDiv.textContent = "偵測到藥粒數量：" + pillCount;
 
-      src.delete(); gray.delete(); contours.delete(); hierarchy.delete();
+      // 清理
+      predictions.forEach(p => p.dispose && p.dispose());
+      imgTensor.dispose();
     });
   </script>
 </body>
 </html>
+
