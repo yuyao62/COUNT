@@ -384,5 +384,38 @@
     setStatus('尚未啟動');
   })();
 </script>
+  </script>
+
+  <!-- 👇👇👇 從這裡貼上我給你的測試碼 👇👇👇 -->
+  <script>
+    alert("JS 已載入（看到這個代表 script 正常）");
+
+    const testBtn = document.getElementById('testBtn');
+    const logEl = document.getElementById('log');
+
+    function log2(msg){
+      console.log(msg);
+      if (logEl) logEl.textContent = msg + "\n" + (logEl.textContent || "");
+    }
+
+    if (!testBtn) {
+      alert("❌ 找不到『測試權限』按鈕（id=testBtn）");
+    } else {
+      testBtn.onclick = async () => {
+        alert("✅ 你有按到『測試權限』按鈕");
+
+        try {
+          const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+          s.getTracks().forEach(t => t.stop());
+          alert("✅ getUserMedia 成功（Safari 已允許相機）");
+        } catch (e) {
+          alert("❌ getUserMedia 失敗：" + (e.name || "Error") + "\n" + e.message);
+        }
+      };
+    }
+  </script>
+  <!-- 👆👆👆 貼到這裡 👆👆👆 -->
+
 </body>
 </html>
+
