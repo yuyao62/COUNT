@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>藥丸計數 WebApp（非 AI 版）</title>
+<title>藥丸計數 WebApp（即時・非 AI）</title>
 
 <style>
 body{font-family:Arial;margin:0;padding:14px;background:#fafafa}
 .wrap{max-width:720px;margin:auto}
-h1{text-align:center}
+h1{text-align:center;margin:8px 0}
 .panel{background:#fff;border-radius:14px;padding:12px;margin:12px 0}
 video,canvas{width:100%;border-radius:12px;background:#111}
 .row{display:flex;gap:10px;justify-content:center;margin-top:10px}
@@ -16,7 +16,7 @@ button{padding:10px 14px;font-size:16px;border-radius:12px;border:1px solid #ccc
 button.primary{border-color:#2563eb;color:#2563eb;font-weight:700}
 #count{text-align:center;font-size:22px;font-weight:900;color:#2563eb;margin-top:10px}
 
-/* iOS 點擊保證 */
+/* iOS 觸控保證 */
 video,canvas{pointer-events:none}
 .row{position:relative;z-index:10}
 </style>
@@ -24,7 +24,7 @@ video,canvas{pointer-events:none}
 
 <body>
 <div class="wrap">
-<h1>💊 藥丸計數 WebApp</h1>
+<h1>💊 藥丸計數 WebApp（即時・非 AI）</h1>
 
 <div class="panel">
   <video id="video" autoplay muted playsinline></video>
@@ -32,7 +32,6 @@ video,canvas{pointer-events:none}
 
   <div class="row">
     <button id="startBtn" class="primary">🎥 啟動相機</button>
-    <button id="scanBtn" class="primary">📸 掃描並計數</button>
     <button id="stopBtn">⏹ 停止</button>
   </div>
 
@@ -47,6 +46,7 @@ const ctx = canvas.getContext('2d');
 const countDiv = document.getElementById('count');
 
 let stream=null;
+let running=false;
 
 /* ===== 相機 ===== */
 async function startCamera(){
@@ -59,30 +59,49 @@ async function startCamera(){
 
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
+
+  running = true;
+  requestAnimationFrame(loop);
 }
 function stopCamera(){
+  running=false;
   if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}
 }
 
-/* ===== 核心：藥丸計數 ===== */
-function countPills(){
+/* ===== 即時處理主迴圈 ===== */
+function loop(){
+  if(!running) return;
+  processFrame();
+  requestAnimationFrame(loop);
+}
+
+/* ===== 核心：即時藥丸偵測 ===== */
+function processFrame(){
   ctx.drawImage(video,0,0,canvas.width,canvas.height);
-
   const img = ctx.getImageData(0,0,canvas.width,canvas.height);
-  const data = img.data;
-  const bw = [];
+  const d = img.data;
 
-  // 灰階 + 閾值
-  for(let i=0;i<data.length;i+=4){
-    const g = 0.299*data[i]+0.587*data[i+1]+0.114*data[i+2];
-    bw.push(g > 180 ? 1 : 0); // 白色藥丸偏亮
+  // 自適應亮度門檻（支援不同顏色）
+  let sum=0;
+  for(let i=0;i<d.length;i+=4){
+    sum += 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
+  }
+  const avg = sum / (d.length/4);
+  const threshold = avg + 15; // 比背景亮 or 偏亮都抓
+
+  const bw = new Uint8Array(canvas.width * canvas.height);
+  for(let i=0,j=0;i<d.length;i+=4,j++){
+    const g = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
+    bw[j] = g > threshold ? 1 : 0;
   }
 
   const visited = new Uint8Array(bw.length);
-  let count = 0;
+  let pills = [];
 
   function flood(i){
     let stack=[i], area=0;
+    let minX=99999,minY=99999,maxX=0,maxY=0;
+
     while(stack.length){
       const p=stack.pop();
       if(visited[p]||!bw[p]) continue;
@@ -91,32 +110,51 @@ function countPills(){
       const x=p%canvas.width;
       const y=(p/canvas.width)|0;
 
+      minX=Math.min(minX,x);
+      minY=Math.min(minY,y);
+      maxX=Math.max(maxX,x);
+      maxY=Math.max(maxY,y);
+
       if(x>0) stack.push(p-1);
       if(x<canvas.width-1) stack.push(p+1);
       if(y>0) stack.push(p-canvas.width);
       if(y<canvas.height-1) stack.push(p+canvas.width);
     }
-    return area;
+
+    return {area,w:maxX-minX+1,h:maxY-minY+1,cx:(minX+maxX)/2,cy:(minY+maxY)/2};
   }
 
-  // 找亮色區塊
   for(let i=0;i<bw.length;i++){
     if(bw[i] && !visited[i]){
-      const area = flood(i);
-      // 面積過濾（依你照片實測 OK）
-      if(area > 800 && area < 20000){
-        count++;
-      }
+      const b = flood(i);
+
+      // 面積過濾（依你場景實測）
+      if(b.area < 800 || b.area > 20000) continue;
+
+      // 形狀接近圓
+      const ratio = b.w / b.h;
+      if(ratio < 0.7 || ratio > 1.4) continue;
+
+      pills.push(b);
     }
   }
 
-  countDiv.textContent = '偵測到藥丸數量：' + count;
+  // 畫圓框
+  ctx.strokeStyle = 'lime';
+  ctx.lineWidth = 3;
+  pills.forEach(p=>{
+    const r = Math.max(p.w,p.h)/2;
+    ctx.beginPath();
+    ctx.arc(p.cx,p.cy,r,0,Math.PI*2);
+    ctx.stroke();
+  });
+
+  countDiv.textContent = '偵測到藥丸數量：' + pills.length;
 }
 
 /* ===== 綁定 ===== */
 document.getElementById('startBtn').onclick=startCamera;
 document.getElementById('stopBtn').onclick=stopCamera;
-document.getElementById('scanBtn').onclick=countPills;
 </script>
 </body>
 </html>
