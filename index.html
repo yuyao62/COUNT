@@ -288,18 +288,11 @@ function processFrame(){
     }
   }
 
-  // ===== 畫 ROI 框 =====
-  // ROI 外淡化一點（視覺聚焦）
-  ctx.save();
-  ctx.fillStyle = 'rgba(0,0,0,0.18)';
-  ctx.fillRect(0,0,W,H);
-  ctx.clearRect(rx,ry,rw,rh);
-  ctx.restore();
-
-  ctx.save();
-  ctx.strokeStyle='rgba(59,130,246,0.95)'; // 藍框
-  ctx.lineWidth=4;
-  ctx.strokeRect(rx,ry,rw,rh);
+  // ===== 畫 ROI 框（不遮黑）=====
+ctx.save();
+ctx.strokeStyle='rgba(59,130,246,0.95)'; // 藍框
+ctx.lineWidth=4;
+ctx.strokeRect(rx,ry,rw,rh);
 
   // 右下角縮放把手
   ctx.fillStyle='rgba(59,130,246,0.95)';
